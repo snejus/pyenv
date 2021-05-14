@@ -1,43 +1,49 @@
 #!/usr/bin/env bash
 # Summary: List all available pyenv commands
-# Usage: pyenv commands [--sh|--no-sh]
+# Usage: pyenv commands [--no-sh|--sh|--vars]
 
 set -e
 [ -n "$PYENV_DEBUG" ] && set -x
 
-# Provide pyenv completions
-if [ "$1" = "--complete" ]; then
-  echo --sh
-  echo --no-sh
-  exit
-fi
+while test $# -gt 0; do
+  arg=$1 && shift
+  case $arg in
+    # Provide pyenv completions
+    --complete) exec printf '%s\n' --sh --no-sh --vars ;;
+    --no-sh) no_sh=1 ;;
+    --sh) only_sh=1 ;;
+    # For internal usage
+    --vars) print_vars=1 ;;
+  esac
+done
 
-if [ "$1" = "--sh" ]; then
-  sh=1
-  shift
-elif [ "$1" = "--no-sh" ]; then
-  nosh=1
-  shift
-fi
+shopt -s nullglob lastpipe
 
-IFS=: paths=($PATH)
-
-shopt -s nullglob
-
-{ for path in "${paths[@]}"; do
-    for command in "${path}/pyenv-"*; do
-      command="${command##*pyenv-}"
-      if [ -n "$sh" ]; then
-        if [ "${command:0:3}" = "sh-" ]; then
-          echo "${command##sh-}"
-        fi
-      elif [ -n "$nosh" ]; then
-        if [ "${command:0:3}" != "sh-" ]; then
-          echo "${command##sh-}"
-        fi
-      else
-        echo "${command##sh-}"
-      fi
-    done
+defaultIFS=$IFS
+IFS=$'\n'
+declare -A COMMAND_TO_PATH
+while read -r base; do
+  for cmdpath in "$base/pyenv-"*; do
+    cmd=${cmdpath##*/pyenv-}
+    if [[ $cmd == sh-* ]]; then
+       ! (( no_sh )) && COMMAND_TO_PATH[${cmd#sh-}]=$cmdpath
+    elif ! (( only_sh )); then
+      COMMAND_TO_PATH[$cmd]=$cmdpath
+    fi
   done
-} | sort | uniq
+done <<< "${PATH//:/$'\n'}"
+
+declare -a SORTED_COMMANDS SORTED_PATHS
+sort <<< "${!COMMAND_TO_PATH[*]}" | {
+  while read -r comm; do
+    SORTED_COMMANDS+=("$comm")
+    SORTED_PATHS+=("${COMMAND_TO_PATH[$comm]}")
+  done
+}
+
+if (( print_vars )); then
+  echo "${COMMAND_TO_PATH[*]@A}; ${SORTED_PATHS[*]@A}; ${SORTED_COMMANDS[*]@A}"
+else
+  printf '%s\n' "${SORTED_COMMANDS[@]}"
+fi
+IFS=$defaultIFS
