@@ -9,15 +9,17 @@
 # where `num_commits` is the number of commits since `version` was
 # tagged.
 
-set -e
 [ -n "$PYENV_DEBUG" ] && set -x
+
+shopt -s lastpipe
 
 version="1.2.27"
 git_revision=""
 
-if cd "${BASH_SOURCE%/*}" 2>/dev/null && git remote -v 2>/dev/null | grep -q pyenv; then
-  git_revision="$(git describe --tags HEAD 2>/dev/null || true)"
-  git_revision="${git_revision#v}"
-fi
-
+# in most cases PYENV_ROOT is already resolved by the main pyenv script
+git -C "$PYENV_ROOT" describe --tags HEAD 2>/dev/null | {
+  read -r revision
+  git_revision=${revision#v}
+}
 echo "pyenv ${git_revision:-$version}"
+exit 0
