@@ -11,13 +11,15 @@
 
 [ -n "$PYENV_DEBUG" ] && set -x
 
+unset GIT_DIR
+
 shopt -s lastpipe
 
 version="1.2.27"
 git_revision=""
 
 # in most cases PYENV_ROOT is already resolved by the main pyenv script
-git -C "$PYENV_ROOT" describe --tags HEAD 2>/dev/null | {
+git -C "${PYENV_ROOT:-${BASH_SOURCE%/*}}" describe --tags HEAD 2>/dev/null | {
   read -r revision
   git_revision=${revision#v}
 }

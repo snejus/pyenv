@@ -6,6 +6,9 @@ if [ "$1" = "--debug" ]; then
   shift
 fi
 
+# Consider only ASCII chars regarding text parsing to speed things up
+export LC_ALL=C
+
 if [ -n "$PYENV_DEBUG" ]; then
   # https://wiki-dev.bash-hackers.org/scripting/debuggingtips#making_xtrace_more_useful
   export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
@@ -13,14 +16,12 @@ if [ -n "$PYENV_DEBUG" ]; then
 fi
 
 abort() {
-  { if [ "$#" -eq 0 ]; then cat -
-    else echo "pyenv: $*"
-    fi
-  } >&2
+  [[ -n $1 ]] && echo "pyenv: $*"
   exit 1
 }
 
-if enable -f "${BASH_SOURCE%/*}"/../libexec/pyenv-realpath.dylib realpath 2>/dev/null; then
+if (enable -f "${BASH_SOURCE%/*}"/../libexec/pyenv-realpath.dylib realpath || \
+    command -pv realpath) &>/dev/null; then
   abs_dirname() {
     local path
     path="$(realpath "$1")"
@@ -56,82 +57,86 @@ else
 fi
 
 if [ -z "${PYENV_ROOT}" ]; then
-  PYENV_ROOT="${HOME}/.pyenv"
-else
-  PYENV_ROOT="${PYENV_ROOT%/}"
+  PYENV_ROOT=$HOME/.pyenv
 fi
 export PYENV_ROOT
 
 if [ -z "${PYENV_DIR}" ]; then
   PYENV_DIR="$PWD"
+else
+  if [ ! -d "$PYENV_DIR" ] || [ ! -e "$PYENV_DIR" ]; then
+    abort "cannot change working directory to \`$PYENV_DIR'"
+  fi
+  if [[ $PYENV_DIR != "$PWD" ]]; then
+    PYENV_DIR=$(cd "$PYENV_DIR" && echo "$PWD")
+  fi
 fi
-
-if [ ! -d "$PYENV_DIR" ] || [ ! -e "$PYENV_DIR" ]; then
-  abort "cannot change working directory to \`$PYENV_DIR'"
-fi
-
-PYENV_DIR=$(cd "$PYENV_DIR" && echo "$PWD")
 export PYENV_DIR
 
+# Only resolve if I am a symlink
+if [[ -h $0 ]]; then
+  libexec_path=$(abs_dirname "$0")
+else
+  # If I am a file, convert relative paths like '/hello/../' to '/'
+  shopt -s extglob
+  libexec_path=${0//\/+([^\/])\/'..'}
+  # And get my dirname
+  libexec_path=${libexec_path%/*}
+fi
 
 shopt -s nullglob
-
-bin_path="$(abs_dirname "$0")"
-for plugin_bin in "${bin_path%/*}"/plugins/*/bin; do
-  PATH="${plugin_bin}:${PATH}"
-done
-for plugin_bin in "${PYENV_ROOT}"/plugins/*/bin; do
-  PATH="${plugin_bin}:${PATH}"
-done
-export PATH="${bin_path}:${PATH}"
-
-PYENV_HOOK_PATH="${PYENV_HOOK_PATH}:${PYENV_ROOT}/pyenv.d"
-if [ "${bin_path%/*}" != "$PYENV_ROOT" ]; then
+plugin_paths=("$PYENV_ROOT"/plugins/*/bin)
+plugin_hooks=("$PYENV_ROOT"/plugins/*/etc/pyenv.d)
+bin_path=${libexec_path%/*}
+if [[ $bin_path == "$PYENV_ROOT" ]]; then
+  PYENV_HOOK_PATH=$PYENV_ROOT/pyenv.d
+else
   # Add pyenv's own `pyenv.d` unless pyenv was cloned to PYENV_ROOT
-  PYENV_HOOK_PATH="${PYENV_HOOK_PATH}:${bin_path%/*}/pyenv.d"
+  PYENV_HOOK_PATH=$bin_path/pyenv.d
+  plugin_paths+=("$bin_path"/plugins/*/bin)
 fi
-PYENV_HOOK_PATH="${PYENV_HOOK_PATH}:/usr/local/etc/pyenv.d:/etc/pyenv.d:/usr/lib/pyenv/hooks"
-for plugin_hook in "${PYENV_ROOT}/plugins/"*/etc/pyenv.d; do
-  PYENV_HOOK_PATH="${PYENV_HOOK_PATH}:${plugin_hook}"
-done
-PYENV_HOOK_PATH="${PYENV_HOOK_PATH#:}"
-export PYENV_HOOK_PATH
+OLDIFS=$IFS; IFS=:
+PYENV_HOOK_PATH+=:/usr/local/etc/pyenv.d:/etc/pyenv.d:/usr/lib/pyenv/hooks:${plugin_hooks[*]}
+export PYENV_HOOK_PATH PATH=$libexec_path:${plugin_paths[*]}:$PATH
+IFS=$OLDIFS
 
-shopt -u nullglob
+# COMMANDS are exported and contains declare calls for
+# - array SORTED_COMMANDS
+# - array SORTED_PATHS
+# - assoc array COMMAND_TO_PATH
+# This ensures that pyenv-commands only has to be called once regardless of where it is used
+declare -x COMMANDS
+COMMANDS="$(pyenv-commands --vars)"
+eval "$COMMANDS"
 
-
-command="$1"
-case "$command" in
-"" )
-  { pyenv---version
+case "$1" in
+  "" )
+    pyenv---version
     pyenv-help
-  } | abort
-  ;;
--v | --version )
-  exec pyenv---version
-  ;;
--h | --help )
-  exec pyenv-help
-  ;;
-* )
-  command_path="$(command -v "pyenv-$command" || true)"
-  if [ -z "$command_path" ]; then
-    if [ "$command" == "shell" ]; then
-      abort "shell integration not enabled. Run \`pyenv init' for instructions."
-    else
-      abort "no such command \`$command'"
+    abort
+    ;;
+  -v | --version )
+    exec pyenv---version
+    ;;
+  -h | --help )
+    exec pyenv-help
+    ;;
+  * )
+    command=$1
+    command_path=${COMMAND_TO_PATH[$command]}
+    if [ -z "$command_path" ]; then
+      if [ "$command" == "shell" ]; then
+        abort "shell integration not enabled. Run \`pyenv init' for instructions."
+      else
+        abort "no such command \`$command'"
+      fi
     fi
-  fi
 
-  shift 1
-  if [ "$1" = --help ]; then
-    if [[ "$command" == "sh-"* ]]; then
-      echo "pyenv help \"$command\""
-    else
+    shift 1
+    if [ "$1" = --help ]; then
       exec pyenv-help "$command"
+    else
+      exec "$command_path" "$@"
     fi
-  else
-    exec "$command_path" "$@"
-  fi
-  ;;
+    ;;
 esac

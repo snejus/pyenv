@@ -8,6 +8,7 @@ setup() {
   mkdir -p "$HOME" "$PYENV_ROOT"
   git config --global user.name  "Tester"
   git config --global user.email "tester@test.local"
+  git config --global init.defaultBranch "main"
   cd "$PYENV_TEST_DIR"
 }
 
@@ -37,7 +38,6 @@ git_commit() {
   git_commit
   git tag v1.0
   unset PYENV_ROOT
-  cd "$PYENV_TEST_DIR"
 
   run pyenv---version
   assert_success

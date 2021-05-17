@@ -57,8 +57,8 @@ load test_helper
   run pyenv echo -F: "PATH"
   assert_success
   assert_line 0 "${BATS_TEST_DIRNAME%/*}/libexec"
-  assert_line 1 "${PYENV_ROOT}/plugins/python-build/bin"
-  assert_line 2 "${PYENV_ROOT}/plugins/pyenv-each/bin"
+  assert_line 1 "${PYENV_ROOT}/plugins/pyenv-each/bin" || assert_line 1 "${PYENV_ROOT}/plugins/python-build/bin"
+  assert_line 2 "${PYENV_ROOT}/plugins/pyenv-each/bin" || assert_line 2 "${PYENV_ROOT}/plugins/python-build/bin"
   assert_line 3 "${BATS_TEST_DIRNAME%/*}/plugins/python-build/bin"
 }
 
