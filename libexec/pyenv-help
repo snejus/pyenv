@@ -15,158 +15,87 @@
 set -e
 [ -n "$PYENV_DEBUG" ] && set -x
 
-# Provide pyenv completions
-if [ "$1" = "--complete" ]; then
-  echo --usage
-  exec pyenv-commands
-fi
-
-command_path() {
-  local command="$1"
-  command -v pyenv-"$command" || command -v pyenv-sh-"$command" || true
-}
-
-extract_initial_comment_block() {
-  LC_ALL= \
-  LC_CTYPE=C \
-  sed -ne "
-    /^#/ !{
-      q
-    }
-
-    s/^#$/# /
-
-    /^# / {
-      s/^# //
-      p
-    }
-  "
-}
-
-collect_documentation() {
-  # shellcheck disable=SC2016
-  $(type -p gawk awk | head -1) '
-    /^Summary:/ {
-      summary = substr($0, 10)
-      next
-    }
-
-    /^Usage:/ {
-      reading_usage = 1
-      usage = usage "\n" $0
-      next
-    }
-
-    /^( *$|       )/ && reading_usage {
-      usage = usage "\n" $0
-      next
-    }
-
-    {
-      reading_usage = 0
-      help = help "\n" $0
-    }
-
-    function escape(str) {
-      gsub(/[`\\$"]/, "\\\\&", str)
-      return str
-    }
-
-    function trim(str) {
-      sub(/^\n*/, "", str)
-      sub(/\n*$/, "", str)
-      return str
-    }
-
-    END {
-      if (usage || summary) {
-        print "summary=\"" escape(summary) "\""
-        print "usage=\"" escape(trim(usage)) "\""
-        print "help=\"" escape(trim(help)) "\""
-      }
-    }
-  '
-}
-
-documentation_for() {
-  local filename
-  filename="$(command_path "$1")"
-  if [ -n "$filename" ]; then
-    extract_initial_comment_block < "$filename" | collect_documentation
-  fi
-}
-
-print_summary() {
-  local command="$1"
-  local summary usage help
-  eval "$(documentation_for "$command")"
-
-  if [ -n "$summary" ]; then
-    printf "   %-9s   %s\n" "$command" "$summary"
-  fi
-}
-
-print_summaries() {
-  for command; do
-    print_summary "$command"
-  done
-}
-
 print_help() {
-  local command="$1"
-  local summary usage help
-  eval "$(documentation_for "$command")"
-  [ -n "$help" ] || help="$summary"
+  file=$1
+  with_help=${2:+1}
 
-  if [ -n "$usage" ] || [ -n "$summary" ]; then
-    if [ -n "$usage" ]; then
-      echo "$usage"
-    else
-      echo "Usage: pyenv ${command}"
-    fi
-    if [ -n "$help" ]; then
-      echo
-      echo "$help"
-      echo
-    fi
+  local -a usage help
+  while read -r line; do
+    case $line in
+      '# Summary:'*)  summary=${line#\# Summary: } ;;
+      '# Usage:'*)    usage+=("${line#\# }") ;;
+      '#   '*)        usage+=("${line#\# }") ;;
+      '# '[A-Za-z]*)  help+=("${line#\# }") ;;
+      '#')            help+=("") ;;
+      [^#])           break ;;
+    esac
+  done < "$file"
+
+  printf '%s\n' "${usage[@]}"
+  ! (( with_help )) && return 0
+
+  echo
+  if (( ${#help} )); then
+    printf '%s\n' "${help[@]}"
   else
-    echo "Sorry, this command isn't documented yet." >&2
-    return 1
+    echo "${summary:-Sorry, this command is not documented yet.}"
   fi
 }
 
-print_usage() {
-  local command="$1"
-  local summary usage help
-  eval "$(documentation_for "$command")"
-  [ -z "$usage" ] || echo "$usage"
+print_all_summaries() {
+  BOLD=$'\e[1m'
+  RESET=$'\e[0m'
+  printf '
+Usage: pyenv <command> [<args>]
+
+Some useful pyenv commands are:
+'
+  grep -oP '^# Summary:\K.*' "${SORTED_PATHS[@]}" | {
+    while read -r line; do
+      if [[ $line =~ /pyenv-(sh-)?([^/:]+):(.*) ]]; then
+        printf '  %-30s %s\n' "$BOLD${BASH_REMATCH[2]}$RESET" "${BASH_REMATCH[3]}"
+      fi
+    done
+  }
+  printf '
+See "pyenv help <command>" for information on a specific command.
+For full documentation, see: https://github.com/pyenv/pyenv#readme
+'
+  exit 0
 }
 
-unset usage
-if [ "$1" = "--usage" ]; then
-  usage="1"
-  shift
-fi
+[[ -n $COMMANDS ]] || COMMANDS=$(pyenv-commands --vars)
+eval "$COMMANDS"
 
-if [ -z "$1" ] || [ "$1" == "pyenv" ]; then
-  echo "Usage: pyenv <command> [<args>]"
-  [ -z "$usage" ] || exit
-  echo
-  echo "Some useful pyenv commands are:"
-  print_summaries $(exec pyenv-commands | sort -u)
-  echo
-  echo "See \`pyenv help <command>' for information on a specific command."
-  echo "For full documentation, see: https://github.com/pyenv/pyenv#readme"
+if [[ -z $1 ]] || [[ $1 == --pyenv ]]; then
+  print_all_summaries
 else
-  command="$1"
-  if [ -n "$(command_path "$command")" ]; then
-    if [ -n "$usage" ]; then
-      print_usage "$command"
-    else
-      print_help "$command"
-    fi
+  while test $# -gt 0; do
+    arg=$1 && shift
+    case $arg in
+      --complete)
+        echo --usage
+        exec printf '%s\n' "${SORTED_COMMANDS[@]}"
+        ;;
+      --usage)
+        usage=1
+        ;;
+      *)
+        cmdpath=${COMMAND_TO_PATH[$arg]}
+        [[ -n $cmdpath ]] || {
+          echo "pyenv: no such command \`$arg'" >&2
+          exit 1
+        }
+        ;;
+    esac
+  done
+  if ! (( usage )); then
+    print_help "$cmdpath" --with-help
   else
-    echo "pyenv: no such command \`$command'" >&2
-    exit 1
+    if [[ -n "$cmdpath" ]]; then
+      print_help "$cmdpath"
+    else
+      print_help "$0"
+    fi
   fi
 fi
