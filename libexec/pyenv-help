@@ -27,7 +27,7 @@ print_help() {
       '#   '*)        usage+=("${line#\# }") ;;
       '# '[A-Za-z]*)  help+=("${line#\# }") ;;
       '#')            help+=("") ;;
-      [^#])           break ;;
+      [^#]*)          break ;;
     esac
   done < "$file"
 
