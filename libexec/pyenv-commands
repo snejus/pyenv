@@ -10,7 +10,7 @@ while test $# -gt 0; do
   case $arg in
     # Provide pyenv completions
     --complete) exec printf '%s\n' --sh --no-sh --vars ;;
-    --no-sh) no_sh=1 ;;
+    --no-sh) exclude_sh=1 ;;
     --sh) only_sh=1 ;;
     # For internal usage
     --vars) print_vars=1 ;;
@@ -23,27 +23,28 @@ defaultIFS=$IFS
 IFS=$'\n'
 declare -A COMMAND_TO_PATH
 while read -r base; do
-  for cmdpath in "$base/pyenv-"*; do
-    cmd=${cmdpath##*/pyenv-}
-    if [[ $cmd == sh-* ]]; then
-       ! (( no_sh )) && COMMAND_TO_PATH[${cmd#sh-}]=$cmdpath
-    elif ! (( only_sh )); then
-      COMMAND_TO_PATH[$cmd]=$cmdpath
-    fi
+  for cmdpath in "$base"/pyenv-*; do
+    COMMAND_TO_PATH[${cmdpath##*/pyenv-}]=$cmdpath
   done
 done <<< "${PATH//:/$'\n'}"
 
 declare -a SORTED_COMMANDS SORTED_PATHS
-sort <<< "${!COMMAND_TO_PATH[*]}" | {
-  while read -r comm; do
-    SORTED_COMMANDS+=("$comm")
-    SORTED_PATHS+=("${COMMAND_TO_PATH[$comm]}")
+sort -u <<< "${!COMMAND_TO_PATH[*]}" | {
+  while read -r cmd; do
+    if [[ $cmd == sh-* ]]; then
+        (( exclude_sh )) && continue
+        [[ -n ${COMMAND_TO_PATH[${cmd#sh-}]} ]] && ! (( only_sh )) && continue
+    elif (( only_sh )); then
+      continue
+    fi
+    SORTED_COMMANDS+=("${cmd#sh-}")
+    SORTED_PATHS+=("${COMMAND_TO_PATH[$cmd]}")
   done
 }
 
 if (( print_vars )); then
   echo "${COMMAND_TO_PATH[*]@A}; ${SORTED_PATHS[*]@A}; ${SORTED_COMMANDS[*]@A}"
 else
-  printf '%s\n' "${SORTED_COMMANDS[@]}"
+  echo "${SORTED_COMMANDS[*]}"
 fi
 IFS=$defaultIFS
